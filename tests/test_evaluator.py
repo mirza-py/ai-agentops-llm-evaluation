@@ -33,13 +33,23 @@ def test_llm_judge(monkeypatch):
     class FakeResponse:
         choices = [FakeChoice()]
 
-    def fake_create(**kwargs):
-        return FakeResponse()
+    class FakeCompletions:
+
+        def create(self, **kwargs):
+            return FakeResponse()
+
+    class FakeChat:
+
+        completions = FakeCompletions()
+
+    class FakeClient:
+
+        chat = FakeChat()
 
     monkeypatch.setattr(
-        evaluator.client.chat.completions,
-        "create",
-        fake_create
+        evaluator,
+        "get_client",
+        lambda: FakeClient()
     )
 
     result = evaluator.llm_judge(
@@ -53,10 +63,20 @@ def test_llm_judge(monkeypatch):
     assert result["clarity"] == 10.0
     assert result["quality_score"] == 9.0
     assert result["failure"] is False
+    assert result["reason"] == "Strong response."
 
 
 def test_extract_json():
 
+    text = """
+    ```json
+    {
+        "relevance": 8,
+        "accuracy": 9
+    }
+    """
+
+    # Test the same JSON extraction logic directly
     text = """
     ```json
     {

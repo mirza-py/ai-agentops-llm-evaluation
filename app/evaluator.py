@@ -1,25 +1,37 @@
 import json
-import re
-from typing import Dict, Any
-
-from groq import Groq
-from dotenv import load_dotenv
 import os
+import re
+from typing import Any, Dict
+
+from dotenv import load_dotenv
+from groq import Groq
 
 
 load_dotenv()
-
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
-)
 
 
 JUDGE_MODEL = "qwen/qwen3.8-27b"
 
 
+def get_client():
+    """
+    Create a Groq client only when an API key is available.
+    This allows CI tests to run without a real API key.
+    """
+
+    api_key = os.getenv("GROQ_API_KEY")
+
+    if not api_key:
+        return None
+
+    return Groq(
+        api_key=api_key
+    )
+
+
 def extract_json(text: str) -> Dict[str, Any]:
     """
-    Extract JSON object from an LLM response.
+    Extract a JSON object from an LLM response.
     """
 
     text = text.strip()
@@ -27,6 +39,7 @@ def extract_json(text: str) -> Dict[str, Any]:
     # Direct JSON
     try:
         return json.loads(text)
+
     except json.JSONDecodeError:
         pass
 
@@ -38,12 +51,16 @@ def extract_json(text: str) -> Dict[str, Any]:
     )
 
     if match:
+
         try:
-            return json.loads(match.group(1))
+            return json.loads(
+                match.group(1)
+            )
+
         except json.JSONDecodeError:
             pass
 
-    # Find first JSON object
+    # Find JSON object inside other text
     match = re.search(
         r"\{.*\}",
         text,
@@ -51,12 +68,18 @@ def extract_json(text: str) -> Dict[str, Any]:
     )
 
     if match:
+
         try:
-            return json.loads(match.group(0))
+            return json.loads(
+                match.group(0)
+            )
+
         except json.JSONDecodeError:
             pass
 
-    raise ValueError("Could not extract valid JSON from evaluator response.")
+    raise ValueError(
+        "Could not extract valid JSON from evaluator response."
+    )
 
 
 def llm_judge(
@@ -66,6 +89,13 @@ def llm_judge(
     """
     Evaluate an LLM response using another LLM as a judge.
     """
+
+    client = get_client()
+
+    if client is None:
+        raise RuntimeError(
+            "GROQ_API_KEY is not configured."
+        )
 
     evaluation_prompt = f"""
 You are an expert LLM evaluation system.
@@ -127,7 +157,10 @@ Required format:
         messages=[
             {
                 "role": "system",
-                "content": "You are a strict JSON-only evaluation engine."
+                "content": (
+                    "You are a strict JSON-only "
+                    "evaluation engine."
+                )
             },
             {
                 "role": "user",
@@ -137,17 +170,36 @@ Required format:
         temperature=0
     )
 
-    raw_result = response.choices[0].message.content
+    raw_result = (
+        response
+        .choices[0]
+        .message
+        .content
+    )
 
-    result = extract_json(raw_result)
+    result = extract_json(
+        raw_result
+    )
 
     return {
-        "relevance": float(result.get("relevance", 0)),
-        "accuracy": float(result.get("accuracy", 0)),
-        "completeness": float(result.get("completeness", 0)),
-        "clarity": float(result.get("clarity", 0)),
-        "quality_score": float(result.get("overall_score", 0)),
-        "failure": bool(result.get("failure", False)),
+        "relevance": float(
+            result.get("relevance", 0)
+        ),
+        "accuracy": float(
+            result.get("accuracy", 0)
+        ),
+        "completeness": float(
+            result.get("completeness", 0)
+        ),
+        "clarity": float(
+            result.get("clarity", 0)
+        ),
+        "quality_score": float(
+            result.get("overall_score", 0)
+        ),
+        "failure": bool(
+            result.get("failure", False)
+        ),
         "reason": result.get(
             "feedback",
             "No feedback available."
@@ -160,10 +212,10 @@ def evaluate_response(
     response: str
 ) -> Dict[str, Any]:
     """
-    Main evaluation function.
+    Main evaluation function used by the FastAPI application.
     """
 
-    # Basic failure check before calling judge
+    # Check for empty LLM response first
     if not response or not response.strip():
 
         return {
@@ -187,7 +239,6 @@ def evaluate_response(
 
     except Exception as e:
 
-        # Evaluation failure should not crash the main LLM response
         return {
             "relevance": 0,
             "accuracy": 0,
